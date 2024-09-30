@@ -87,7 +87,7 @@ const refreshToken = async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
 
     if (String(storedToken.userId) !== decoded.id) {
       return res.status(403).json({ message: "Unmatched refresh token" });
