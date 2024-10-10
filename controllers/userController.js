@@ -1,50 +1,99 @@
-const User = require("../models/User");
+const { User, userValidationSchema } = require("../models/User");
 const jwt = require("jsonwebtoken");
 const UserRoles = require("../models/UserRoles");
 const RefreshTokenRepository = require("../repositories/RefreshTokenRepository");
+const RoleRepository = require("../repositories/RoleRepository");
+const { default: mongoose } = require("mongoose");
+const { listUsers, findUserById, editUser } = require("../repositories/UserRepository");
+const { deleteRolesByUserId } = require("../repositories/UserRoleRepository");
 
-// const process.env.JWT_SECRET = process.env.JWT_SECRET;
-// const process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
-// const process.env.TOKEN_EXPIRES_IN = process.env.TOKEN_EXPIRES_IN;
-// const process.env.REFRESH_TOKEN_EXPIRES_IN = process.env.REFRESH_TOKEN_EXPIRES_IN;
+const registerUser = async (req, res) =>
+{
+  userValidationSchema.validate(req.body);
+  console.log("request body:", req.body)
+  const {
+    username,
+    firstName,
+    lastName,
+    grandFatherName,
+    email,
+    phone,
+    password,
+    status,
+    roles,
+  } = req.body;
 
-const registerUser = async (req, res) => {
-  const { username, email, password } = req.body;
+  const session = await mongoose.startSession();
 
-  try {
+  try
+  {
     let user = await User.findOne({ username });
-    if (user) {
+    if (user)
+    {
       return res.status(400).json({ message: "User already exists" });
     }
 
-    user = new User({ username, email, password });
-    await user.save();
+    user = new User({
+      username,
+      firstName,
+      lastName,
+      grandFatherName,
+      email,
+      phone,
+      password,
+      status,
+    });
+
+    session.startTransaction();
+    const result = await user.save({ session });
+
+    await RoleRepository.addToRolesAsync(result._id, roles, session);
+    await session.commitTransaction();
     res.status(201).json({ message: "User registered successfully" });
-  } catch (error) {
-    res.status(500).json({ message: "Error creating user", error });
+  } catch (error)
+  {
+    console.error("Error during user registration:", error);
+    await session.abortTransaction();
+    if (error.name === "ValidationError")
+    {
+      return res.status(400).json({
+        message: error._message,
+        details:
+          "One or more validation errors occurred. Please check your input.",
+      });
+    }
+    return res.status(500).json({ message: "Error creating user", error });
+  } finally
+  {
+    session.endSession();
   }
 };
 
-const loginUser = async (req, res) => {
-  console.log("process:", process.env.JWT_SECRET);
+const loginUser = async (req, res) =>
+{
   const { username, password } = req.body;
 
-  try {
+  try
+  {
     const user = await User.findOne({ username });
-    if (!user) {
+    if (!user)
+    {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const isMatch = await user.isValidPassword(password);
-    if (!isMatch) {
+    if (!isMatch)
+    {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
     const userRoles = await UserRoles.find({ userId: user._id }).populate(
       "roleId"
     );
-
-    const roles = userRoles.map((userRole) => userRole.roleId.name);
+    var roles = userRoles.length === 0
+      ? []
+      : userRoles.map((userRole) => userRole.roleId ? userRole.roleId.name : null)
+        .filter(name => name !== null);
 
     const payload = {
       id: user._id,
@@ -63,33 +112,39 @@ const loginUser = async (req, res) => {
     );
 
     await RefreshTokenRepository.createRefreshToken(user._id, refreshToken);
-
     res.json({ token, refreshToken });
-  } catch (error) {
+  } catch (error)
+  {
     console.log(error);
     res.status(500).json({ message: "Error logging in", error });
   }
 };
 
-const refreshToken = async (req, res) => {
+const refreshToken = async (req, res) =>
+{
   const { token } = req.body;
-
-  if (!token) {
+  console.log(token);
+  if (!token)
+  {
     return res.status(401).json({ message: "No refresh token provided" });
   }
 
   const storedToken = await RefreshTokenRepository.findByToken(token);
-  if (!storedToken) {
+  if (!storedToken)
+  {
     return res.status(403).json({ message: "Invalid refresh token" });
   }
-  if (storedToken.expired) {
+  if (storedToken.expired)
+  {
     return res.status(403).json({ message: "Expired refresh token" });
   }
 
-  try {
+  try
+  {
     const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET);
 
-    if (String(storedToken.userId) !== decoded.id) {
+    if (String(storedToken.userId) !== decoded.id)
+    {
       return res.status(403).json({ message: "Unmatched refresh token" });
     }
 
@@ -119,18 +174,111 @@ const refreshToken = async (req, res) => {
     );
     await RefreshTokenRepository.expireToken(storedToken.refreshToken);
     res.json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
-  } catch (error) {
+  } catch (error)
+  {
     return res
       .status(403)
       .json({ message: "Invalid or expired refresh token", error: error });
   }
 };
 
-const getAdminResource = (req, res) => {
+const getAllUsers = async (req, res) =>
+{
+  try
+  {
+    const users = await listUsers();
+    return res.status(200).json(users);
+  } catch (error)
+  {
+    return res.status(500).json({ message: "Unexpected error while fetching data.", error })
+  }
+}
+
+const updateUser = async (req, res) =>
+{
+  const userId = req.params.id;
+  const { username,
+    firstName,
+    lastName,
+    grandFatherName,
+    email,
+    phone,
+    status,
+    roles } = req.body;
+
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try
+  {
+
+    const updatedUser = await editUser(userId, {
+      username,
+      firstName,
+      lastName,
+      grandFatherName,
+      email,
+      phone,
+      status,
+    }, session);
+
+
+    console.log("AMANUELG:", roles)
+    if (!updatedUser)
+    {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+
+    await deleteRolesByUserId(userId, session);
+
+
+    const newUserRoles = roles.map(roleId => ({
+      userId: userId,
+      roleId: roleId
+    }));
+
+
+    const frs = await RoleRepository.addToRolesAsync(userId, roles, session);
+
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({ message: 'User and roles updated successfully' });
+  } catch (error)
+  {
+
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ message: 'Error updating user and roles', error });
+  }
+}
+
+const getUser = async (req, res) =>
+{
+  try
+  {
+    const user = await findUserById(req.params.id);
+    if (!user)
+    {
+      return res.status(404).json({ message: "User not found." })
+    }
+    return res.status(200).json(user[0]);
+  } catch (error)
+  {
+    return res.status(500).json({ message: "Unexpected error while fetching data.", error })
+  }
+}
+
+const getAdminResource = (req, res) =>
+{
   res.json({ message: "Welcome, Admin!" });
 };
 
-const getUserResource = (req, res) => {
+const getUserResource = (req, res) =>
+{
   res.json({ message: "Welcome, User!" });
 };
 
@@ -140,4 +288,7 @@ module.exports = {
   refreshToken,
   getAdminResource,
   getUserResource,
+  getAllUsers,
+  getUser,
+  updateUser
 };

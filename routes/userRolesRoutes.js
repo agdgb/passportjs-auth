@@ -1,7 +1,7 @@
 const express = require("express");
 
 const {
-  assignRoleToUser,
+  addToRoleAsync,
   getUserRoles,
   removeUserRole,
   getUsersInRole,
@@ -9,7 +9,7 @@ const {
 
 const router = express.Router();
 
-router.post("/assign", assignRoleToUser);
+router.post("/assign", addToRoleAsync);
 
 router.get("/:userId", getUserRoles);
 
