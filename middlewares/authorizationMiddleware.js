@@ -5,7 +5,7 @@ const Authorize = (allowedRoles) =>
     const userHasRole = req.user.roles.some((role) =>
       allowedRoles.includes(role)
     );
-    console.log("ABCDEFG", userHasRole)
+
     if (!userHasRole)
     {
       return res

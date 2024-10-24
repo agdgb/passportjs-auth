@@ -4,13 +4,13 @@ const UserRoles = require("../models/UserRoles");
 const RefreshTokenRepository = require("../repositories/RefreshTokenRepository");
 const RoleRepository = require("../repositories/RoleRepository");
 const { default: mongoose } = require("mongoose");
-const { listUsers, findUserById, editUser } = require("../repositories/UserRepository");
+const { listUsers, findUserById, editUser, deactivateUser, updateProfile, changePassword } = require("../repositories/UserRepository");
 const { deleteRolesByUserId } = require("../repositories/UserRoleRepository");
 
 const registerUser = async (req, res) =>
 {
   userValidationSchema.validate(req.body);
-  console.log("request body:", req.body)
+
   const {
     username,
     firstName,
@@ -67,7 +67,7 @@ const registerUser = async (req, res) =>
   {
     session.endSession();
   }
-};
+}
 
 const loginUser = async (req, res) =>
 {
@@ -78,13 +78,13 @@ const loginUser = async (req, res) =>
     const user = await User.findOne({ username });
     if (!user)
     {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(400).json({ message: "Invalid credentials" });
     }
 
     const isMatch = await user.isValidPassword(password);
     if (!isMatch)
     {
-      return res.status(401).json({ message: "Invalid credentials" });
+      return res.status(400).json({ message: "Invalid credentials" });
     }
 
     const userRoles = await UserRoles.find({ userId: user._id }).populate(
@@ -112,18 +112,19 @@ const loginUser = async (req, res) =>
     );
 
     await RefreshTokenRepository.createRefreshToken(user._id, refreshToken);
-    res.json({ token, refreshToken });
+    const currentUser = user._id
+    res.status(200).json({ token, refreshToken, currentUser });
   } catch (error)
   {
-    console.log(error);
+
     res.status(500).json({ message: "Error logging in", error });
   }
-};
+}
 
 const refreshToken = async (req, res) =>
 {
   const { token } = req.body;
-  console.log(token);
+
   if (!token)
   {
     return res.status(401).json({ message: "No refresh token provided" });
@@ -180,7 +181,7 @@ const refreshToken = async (req, res) =>
       .status(403)
       .json({ message: "Invalid or expired refresh token", error: error });
   }
-};
+}
 
 const getAllUsers = async (req, res) =>
 {
@@ -206,13 +207,11 @@ const updateUser = async (req, res) =>
     status,
     roles } = req.body;
 
-
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try
   {
-
     const updatedUser = await editUser(userId, {
       username,
       firstName,
@@ -223,25 +222,19 @@ const updateUser = async (req, res) =>
       status,
     }, session);
 
-
-    console.log("AMANUELG:", roles)
     if (!updatedUser)
     {
       return res.status(404).json({ message: 'User not found' });
     }
 
-
     await deleteRolesByUserId(userId, session);
-
 
     const newUserRoles = roles.map(roleId => ({
       userId: userId,
       roleId: roleId
     }));
 
-
     const frs = await RoleRepository.addToRolesAsync(userId, roles, session);
-
 
     await session.commitTransaction();
     session.endSession();
@@ -249,7 +242,6 @@ const updateUser = async (req, res) =>
     res.status(200).json({ message: 'User and roles updated successfully' });
   } catch (error)
   {
-
     await session.abortTransaction();
     session.endSession();
     res.status(500).json({ message: 'Error updating user and roles', error });
@@ -272,15 +264,99 @@ const getUser = async (req, res) =>
   }
 }
 
+const profile = async (req, res) =>
+{
+
+  try
+  {
+    const user = await findUserById(req.user.id);
+    if (!user)
+    {
+      return res.status(404).json({ message: "User not found." })
+    }
+    return res.status(200).json(user[0]);
+  } catch (error)
+  {
+    return res.status(500).json({ message: "Unexpected error while fetching data.", error })
+  }
+}
+
+const updateUserProfile = async (req, res) =>
+{
+  const userId = req.user.id;
+  const userDetails = req.body;
+
+  const {
+    username,
+    firstName,
+    lastName,
+    grandFatherName,
+    email,
+    phone
+  } = req.body;
+
+
+  try
+  {
+    const updatedUser = await updateProfile(userId, {
+      username,
+      firstName,
+      lastName,
+      grandFatherName,
+      email,
+      phone
+    });
+    return res.status(200).json({ message: "User profile updated." });
+  } catch (error)
+  {
+    return res.status(500).json({ message: "Error updating profile", error });
+  }
+}
+
 const getAdminResource = (req, res) =>
 {
   res.json({ message: "Welcome, Admin!" });
-};
+}
 
 const getUserResource = (req, res) =>
 {
   res.json({ message: "Welcome, User!" });
-};
+}
+
+const deleteUser = async (req, res) =>
+{
+  const { id } = req.params;
+  try
+  {
+    const deletedUser = await deactivateUser(id);
+
+    if (!deletedUser)
+    {
+      return res.status(404).json({ message: "User not found" });
+    }
+
+    res.status(200).json({ message: "User deleted successfully", user: deletedUser });
+  } catch (error)
+  {
+    console.error("Error deleting user:", error);
+    res.status(500).json({ message: "Server error, could not delete user" });
+  }
+}
+
+const changeUserPassword = async (req, res) =>
+{
+  const userId = req.user.id;
+  const { currentPassword, password } = req.body;
+
+  try
+  {
+    const user = await changePassword(userId, currentPassword, password);
+    return res.status(200).json({ message: `Password changed successfully ${user.firstName} ${user.lastName}` });
+  } catch (error)
+  {
+    return res.status(400).json({ message: error.message, error: error });
+  }
+}
 
 module.exports = {
   registerUser,
@@ -290,5 +366,9 @@ module.exports = {
   getUserResource,
   getAllUsers,
   getUser,
-  updateUser
+  updateUser,
+  deleteUser,
+  profile,
+  updateUserProfile,
+  changeUserPassword
 };

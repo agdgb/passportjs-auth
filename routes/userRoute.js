@@ -9,9 +9,12 @@ const {
   getAllUsers,
   getUser,
   updateUser,
+  deleteUser,
+  profile,
+  updateUserProfile,
+  changeUserPassword
 } = require("../controllers/userController");
 const Authorize = require("../middlewares/authorizationMiddleware");
-const { editUser } = require("../repositories/UserRepository");
 
 const router = express.Router();
 
@@ -21,16 +24,14 @@ router.post("/login", loginUser);
 router.post("/refresh", refreshToken);
 
 //user routes
-//passport.authenticate("jwt", { session: false }), Authorize(["admin"]),
-router.get("/", getAllUsers);
+router.get("/", passport.authenticate("jwt", { session: false }), Authorize(['Admin']), getAllUsers);
+router.get("/profile", passport.authenticate("jwt", { session: false }), Authorize(['Admin']), profile);
+router.put("/profile", passport.authenticate("jwt", { session: false }), Authorize(['Admin']), updateUserProfile);
+router.put("/changepassword", passport.authenticate("jwt", { session: false }), Authorize(['Admin']), changeUserPassword);
 router.get("/:id", getUser);
 router.put("/:id", updateUser);
-router.get(
-  "/admin", passport.authenticate("jwt", { session: false }), Authorize(["Admin, user"]), getAdminResource
-);
-
-router.get(
-  "/user", passport.authenticate("jwt", { session: false }), Authorize(["user", "Admin"]), getUserResource
-);
+router.put("/delete/:id", deleteUser);
+router.get("/admin", passport.authenticate("jwt", { session: false }), Authorize(["Admin, user"]), getAdminResource);
+router.get("/user", passport.authenticate("jwt", { session: false }), Authorize(["user", "Admin"]), getUserResource);
 
 module.exports = router;
